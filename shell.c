@@ -9,15 +9,12 @@
 
 void execute_command(char **args) {
     pid_t pid = fork();
-
     if (pid == 0) {
-        // Child process — run the command
         if (execvp(args[0], args) == -1) {
             printf("myshell: command not found: %s\n", args[0]);
         }
         exit(1);
     } else if (pid > 0) {
-        // Parent process — wait for child to finish
         wait(NULL);
     } else {
         printf("myshell: failed to fork\n");
@@ -27,7 +24,6 @@ void execute_command(char **args) {
 char **parse_input(char *input) {
     char **args = malloc(MAX_ARGS * sizeof(char *));
     int i = 0;
-
     char *token = strtok(input, " ");
     while (token != NULL && i < MAX_ARGS - 1) {
         args[i++] = token;
@@ -35,6 +31,42 @@ char **parse_input(char *input) {
     }
     args[i] = NULL;
     return args;
+}
+
+void execute_pipe(char *cmd1, char *cmd2) {
+    int pipefd[2];
+    pipe(pipefd);
+
+    char **args1 = parse_input(cmd1);
+    char **args2 = parse_input(cmd2);
+
+    pid_t pid1 = fork();
+    if (pid1 == 0) {
+        // First command writes to pipe
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        execvp(args1[0], args1);
+        exit(1);
+    }
+
+    pid_t pid2 = fork();
+    if (pid2 == 0) {
+        // Second command reads from pipe
+        dup2(pipefd[0], STDIN_FILENO);
+        close(pipefd[1]);
+        close(pipefd[0]);
+        execvp(args2[0], args2);
+        exit(1);
+    }
+
+    close(pipefd[0]);
+    close(pipefd[1]);
+    waitpid(pid1, NULL, 0);
+    waitpid(pid2, NULL, 0);
+
+    free(args1);
+    free(args2);
 }
 
 int main() {
@@ -50,21 +82,28 @@ int main() {
         }
 
         input[strcspn(input, "\n")] = 0;
-
-        // Skip empty input
         if (strlen(input) == 0) continue;
 
-        // Parse into args
+        // Check for pipe
+        char *pipe_pos = strchr(input, '|');
+        if (pipe_pos != NULL) {
+            *pipe_pos = '\0';
+            char *cmd1 = input;
+            char *cmd2 = pipe_pos + 1;
+            // Trim spaces
+            while (*cmd2 == ' ') cmd2++;
+            execute_pipe(cmd1, cmd2);
+            continue;
+        }
+
         char **args = parse_input(input);
 
-        // Built-in: exit
         if (strcmp(args[0], "exit") == 0) {
             printf("Bye!\n");
             free(args);
             exit(0);
         }
 
-        // Built-in: cd
         if (strcmp(args[0], "cd") == 0) {
             if (args[1] == NULL) {
                 chdir(getenv("HOME"));
@@ -75,7 +114,6 @@ int main() {
             continue;
         }
 
-        // Execute everything else
         execute_command(args);
         free(args);
     }
