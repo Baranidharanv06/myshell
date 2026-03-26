@@ -3,13 +3,24 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #define MAX_INPUT 1024
 #define MAX_ARGS 64
 
-void execute_command(char **args) {
+void execute_command(char **args, char *output_file) {
     pid_t pid = fork();
     if (pid == 0) {
+        // If output file specified, redirect stdout to file
+        if (output_file != NULL) {
+            int fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd < 0) {
+                printf("myshell: cannot open file: %s\n", output_file);
+                exit(1);
+            }
+            dup2(fd, STDOUT_FILENO);
+            close(fd);
+        }
         if (execvp(args[0], args) == -1) {
             printf("myshell: command not found: %s\n", args[0]);
         }
@@ -42,7 +53,6 @@ void execute_pipe(char *cmd1, char *cmd2) {
 
     pid_t pid1 = fork();
     if (pid1 == 0) {
-        // First command writes to pipe
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[0]);
         close(pipefd[1]);
@@ -52,7 +62,6 @@ void execute_pipe(char *cmd1, char *cmd2) {
 
     pid_t pid2 = fork();
     if (pid2 == 0) {
-        // Second command reads from pipe
         dup2(pipefd[0], STDIN_FILENO);
         close(pipefd[1]);
         close(pipefd[0]);
@@ -90,10 +99,21 @@ int main() {
             *pipe_pos = '\0';
             char *cmd1 = input;
             char *cmd2 = pipe_pos + 1;
-            // Trim spaces
             while (*cmd2 == ' ') cmd2++;
             execute_pipe(cmd1, cmd2);
             continue;
+        }
+
+        // Check for output redirection
+        char *output_file = NULL;
+        char *redir_pos = strchr(input, '>');
+        if (redir_pos != NULL) {
+            *redir_pos = '\0';
+            output_file = redir_pos + 1;
+            while (*output_file == ' ') output_file++;
+            // Remove trailing spaces from command
+            char *end = redir_pos - 1;
+            while (end > input && *end == ' ') *end-- = '\0';
         }
 
         char **args = parse_input(input);
@@ -114,7 +134,7 @@ int main() {
             continue;
         }
 
-        execute_command(args);
+        execute_command(args, output_file);
         free(args);
     }
 
