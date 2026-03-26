@@ -1,17 +1,17 @@
-#include <stdio.h>
+\#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
-#define MAX_INPUT 1024
 #define MAX_ARGS 64
 
 void execute_command(char **args, char *output_file) {
     pid_t pid = fork();
     if (pid == 0) {
-        // If output file specified, redirect stdout to file
         if (output_file != NULL) {
             int fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) {
@@ -79,19 +79,27 @@ void execute_pipe(char *cmd1, char *cmd2) {
 }
 
 int main() {
-    char input[MAX_INPUT];
+    // Colors
+    char *prompt = "\033[1;32mmyshell\033[0m\033[1;34m>\033[0m ";
+
+    char *input;
 
     while (1) {
-        printf("myshell> ");
-        fflush(stdout);
+        // readline handles history and arrow keys
+        input = readline(prompt);
 
-        if (fgets(input, sizeof(input), stdin) == NULL) {
+        if (input == NULL) {
             printf("\nExiting...\n");
             break;
         }
 
-        input[strcspn(input, "\n")] = 0;
-        if (strlen(input) == 0) continue;
+        if (strlen(input) == 0) {
+            free(input);
+            continue;
+        }
+
+        // Add to history so up arrow works
+        add_history(input);
 
         // Check for pipe
         char *pipe_pos = strchr(input, '|');
@@ -101,6 +109,7 @@ int main() {
             char *cmd2 = pipe_pos + 1;
             while (*cmd2 == ' ') cmd2++;
             execute_pipe(cmd1, cmd2);
+            free(input);
             continue;
         }
 
@@ -111,7 +120,6 @@ int main() {
             *redir_pos = '\0';
             output_file = redir_pos + 1;
             while (*output_file == ' ') output_file++;
-            // Remove trailing spaces from command
             char *end = redir_pos - 1;
             while (end > input && *end == ' ') *end-- = '\0';
         }
@@ -121,6 +129,7 @@ int main() {
         if (strcmp(args[0], "exit") == 0) {
             printf("Bye!\n");
             free(args);
+            free(input);
             exit(0);
         }
 
@@ -131,11 +140,13 @@ int main() {
                 printf("myshell: cd: no such directory: %s\n", args[1]);
             }
             free(args);
+            free(input);
             continue;
         }
 
         execute_command(args, output_file);
         free(args);
+        free(input);
     }
 
     return 0;
